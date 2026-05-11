@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
 import {
   SafeAreaView,
   View,
@@ -8,10 +9,12 @@ import {
   StyleSheet,
   StatusBar,
   ScrollView,
+  Animated,
 } from "react-native";
 
 import { supabase } from "./src/screens/connection/supabase-client";
 
+// ================= WORDS =================
 const wordsList = {
   easy: ["apple", "cat", "sun", "book", "water", "chair"],
   hard: ["javascript", "database", "component", "keyboard", "architecture"],
@@ -22,7 +25,6 @@ const wordsList = {
   ],
 };
 
-// ================= WORD GENERATOR =================
 const generateWords = (mode: keyof typeof wordsList) => {
   const source = wordsList[mode];
 
@@ -33,16 +35,28 @@ const generateWords = (mode: keyof typeof wordsList) => {
 };
 
 export default function App() {
-  const [registered, setRegistered] = useState(false);
-  const [username, setUsername] = useState("");
+  // ================= AUTH =================
+  const [screen, setScreen] = useState<
+    "welcome" | "login" | "register" | "app"
+  >("welcome");
 
-  const [mode, setMode] = useState<keyof typeof wordsList>("easy");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  const [authError, setAuthError] = useState("");
+
+  // ================= APP =================
+  const [mode, setMode] =
+    useState<keyof typeof wordsList>("easy");
+
   const [time, setTime] = useState(30);
 
   const [started, setStarted] = useState(false);
   const [finished, setFinished] = useState(false);
 
-  const [words, setWords] = useState<string[]>(generateWords("easy"));
+  const [words, setWords] =
+    useState<string[]>(generateWords("easy"));
+
   const [typed, setTyped] = useState("");
   const [timeLeft, setTimeLeft] = useState(30);
 
@@ -50,32 +64,133 @@ export default function App() {
 
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
 
+  const [showTypers, setShowTypers] = useState(false);
+
+  const [allTypers, setAllTypers] = useState<any[]>([]);
+
   // ================= WINDOW =================
   const [windowStart, setWindowStart] = useState(0);
+
   const WINDOW_SIZE = 12;
 
   const typedWords = typed.trim().split(/\s+/).filter(Boolean);
 
-  // ================= SAVE USER =================
-  const saveUser = async () => {
-    try {
-      const { error } = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            username: username.trim(),
-          },
-          {
-            onConflict: "username",
-          }
-        );
+  // ================= ANIMATION =================
+  const floatAnim1 = useRef(new Animated.Value(0)).current;
+  const floatAnim2 = useRef(new Animated.Value(0)).current;
 
-      if (error) {
-        console.log(error);
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim1, {
+          toValue: 1,
+          duration: 4000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(floatAnim1, {
+          toValue: 0,
+          duration: 4000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim2, {
+          toValue: 1,
+          duration: 5000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(floatAnim2, {
+          toValue: 0,
+          duration: 5000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, []);
+
+  const move1 = floatAnim1.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -30],
+  });
+
+  const move2 = floatAnim2.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 40],
+  });
+
+  // ================= REGISTER =================
+  const registerUser = async () => {
+    try {
+      setAuthError("");
+
+      const cleanUsername = username.trim().toLowerCase();
+
+      if (!cleanUsername || !password.trim()) {
+        setAuthError("Complete all fields.");
         return;
       }
 
-      setRegistered(true);
+      const { data: existingUser } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("username", cleanUsername)
+        .maybeSingle();
+
+      if (existingUser) {
+        setAuthError("Username already exists.");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("profiles")
+        .insert([
+          {
+            username: cleanUsername,
+            password: password,
+          },
+        ]);
+
+      if (error) {
+        console.log(error);
+        setAuthError("Registration failed.");
+        return;
+      }
+
+      setScreen("app");
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
+  // ================= LOGIN =================
+  const loginUser = async () => {
+    try {
+      setAuthError("");
+
+      const cleanUsername = username.trim().toLowerCase();
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("username", cleanUsername)
+        .eq("password", password)
+        .maybeSingle();
+
+      if (error) {
+        console.log(error);
+        setAuthError("Login error.");
+        return;
+      }
+
+      if (!data) {
+        setAuthError("Invalid username or password.");
+        return;
+      }
+
+      setScreen("app");
     } catch (err) {
       console.log(err);
     }
@@ -87,47 +202,70 @@ export default function App() {
     finalAccuracy: number
   ) => {
     try {
-      const { data, error } = await supabase
-        .from("typing_scores")
-        .insert([
-          {
-            username: username.trim(),
-            wpm: Number(finalWpm),
-            accuracy: Number(finalAccuracy),
-            mode: String(mode),
-            time_limit: Number(time),
-          },
-        ])
-        .select();
+      const cleanUsername = username.trim().toLowerCase();
 
-      if (error) {
-        console.log("SUPABASE ERROR:", error);
-      } else {
-        console.log("SUCCESS:", data);
+      const { data: oldScore } = await supabase
+        .from("typing_scores")
+        .select("*")
+        .eq("username", cleanUsername)
+        .maybeSingle();
+
+      if (!oldScore) {
+        await supabase.from("typing_scores").insert([
+          {
+            username: cleanUsername,
+            wpm: finalWpm,
+            accuracy: finalAccuracy,
+            mode,
+            time_limit: time,
+          },
+        ]);
+
+        return;
+      }
+
+      if (finalWpm > oldScore.wpm) {
+        await supabase
+          .from("typing_scores")
+          .update({
+            wpm: finalWpm,
+            accuracy: finalAccuracy,
+            mode,
+            time_limit: time,
+          })
+          .eq("username", cleanUsername);
       }
     } catch (err) {
-      console.log("CATCH ERROR:", err);
+      console.log(err);
     }
   };
 
-  // ================= FETCH LEADERBOARD =================
+  // ================= LEADERBOARD =================
   const fetchLeaderboard = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("typing_scores")
       .select("*")
       .order("wpm", { ascending: false })
-      .limit(10);
-
-    if (error) {
-      console.log("LEADERBOARD ERROR:", error);
-    }
+      .limit(5);
 
     if (data) {
       setLeaderboard(data);
     }
   };
 
-  // ================= TIMER (FIXED) =================
+  // ================= USERS =================
+  const fetchTypers = async () => {
+    const { data } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("username", { ascending: true });
+
+    if (data) {
+      setAllTypers(data);
+    }
+  };
+
+  // ================= TIMER =================
   useEffect(() => {
     if (!started || finished) return;
 
@@ -141,6 +279,7 @@ export default function App() {
             : 0;
 
           let correct = 0;
+
           const fullText = words.join(" ");
 
           for (let i = 0; i < typed.length; i++) {
@@ -168,16 +307,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-
-    // FIX: removed typed from dependency
   }, [started, finished]);
-
-  // ================= FETCH AFTER FINISH =================
-  useEffect(() => {
-    if (finished) {
-      fetchLeaderboard();
-    }
-  }, [finished]);
 
   // ================= AUTO SCROLL =================
   useEffect(() => {
@@ -194,12 +324,15 @@ export default function App() {
     newTime?: number
   ) => {
     const finalMode = newMode ?? mode;
+
     const finalTime = newTime ?? time;
 
     setStarted(false);
+
     setFinished(false);
 
     setTyped("");
+
     setTimeLeft(finalTime);
 
     setWords(generateWords(finalMode));
@@ -207,12 +340,6 @@ export default function App() {
     setWindowStart(0);
 
     setInputKey((k) => k + 1);
-  };
-
-  // ================= START =================
-  const startTest = () => {
-    setStarted(true);
-    setFinished(false);
   };
 
   // ================= WPM =================
@@ -239,43 +366,199 @@ export default function App() {
     return Math.floor((correct / typed.length) * 100);
   }, [typed, words]);
 
-  // ================= VISIBLE WORDS =================
+  // ================= WORDS =================
   const visibleWords = words.slice(
     windowStart,
     windowStart + WINDOW_SIZE
   );
 
-  // ================= REGISTER SCREEN =================
-  if (!registered) {
+  // ================= WELCOME =================
+  if (screen === "welcome") {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" />
+        <View style={styles.background}>
+          <Animated.View
+            style={[
+              styles.blob1,
+              {
+                transform: [{ translateY: move1 }],
+              },
+            ]}
+          />
+
+          <Animated.View
+            style={[
+              styles.blob2,
+              {
+                transform: [{ translateY: move2 }],
+              },
+            ]}
+          />
+        </View>
 
         <View style={styles.center}>
           <Text style={styles.logo}>TYPE-X</Text>
 
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => setScreen("login")}
+          >
+            <Text style={styles.buttonText}>
+              START
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ================= LOGIN =================
+  if (screen === "login") {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.background}>
+          <Animated.View
+            style={[
+              styles.blob1,
+              {
+                transform: [{ translateY: move1 }],
+              },
+            ]}
+          />
+
+          <Animated.View
+            style={[
+              styles.blob2,
+              {
+                transform: [{ translateY: move2 }],
+              },
+            ]}
+          />
+        </View>
+
+        <View style={styles.center}>
+          <Text style={styles.logo}>LOGIN</Text>
+
           <View style={styles.card}>
-            <Text style={styles.title}>Enter Username</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Username"
+              placeholderTextColor="#888"
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+            />
 
             <TextInput
               style={styles.input}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="username..."
-              placeholderTextColor="#666"
+              placeholder="Password"
+              placeholderTextColor="#888"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
             />
+
+            {authError ? (
+              <Text style={styles.errorText}>
+                {authError}
+              </Text>
+            ) : null}
 
             <TouchableOpacity
               style={styles.button}
-              onPress={async () => {
-                if (!username.trim()) return;
+              onPress={loginUser}
+            >
+              <Text style={styles.buttonText}>
+                LOGIN
+              </Text>
+            </TouchableOpacity>
 
-                await saveUser();
-
-                setRegistered(true);
+            <TouchableOpacity
+              onPress={() => {
+                setAuthError("");
+                setScreen("register");
               }}
             >
-              <Text style={styles.buttonText}>Start</Text>
+              <Text style={styles.link}>
+                No account? Register
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ================= REGISTER =================
+  if (screen === "register") {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.background}>
+          <Animated.View
+            style={[
+              styles.blob1,
+              {
+                transform: [{ translateY: move1 }],
+              },
+            ]}
+          />
+
+          <Animated.View
+            style={[
+              styles.blob2,
+              {
+                transform: [{ translateY: move2 }],
+              },
+            ]}
+          />
+        </View>
+
+        <View style={styles.center}>
+          <Text style={styles.logo}>REGISTER</Text>
+
+          <View style={styles.card}>
+            <TextInput
+              style={styles.input}
+              placeholder="Username"
+              placeholderTextColor="#888"
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor="#888"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
+
+            {authError ? (
+              <Text style={styles.errorText}>
+                {authError}
+              </Text>
+            ) : null}
+
+            <TouchableOpacity
+              style={styles.button}
+              onPress={registerUser}
+            >
+              <Text style={styles.buttonText}>
+                REGISTER
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                setAuthError("");
+                setScreen("login");
+              }}
+            >
+              <Text style={styles.link}>
+                Already have account? Login
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -288,12 +571,35 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      <ScrollView contentContainerStyle={{ padding: 20 }}>
-        {/* HEADER */}
-        <View style={styles.header}>
-          <Text style={styles.logo}>TYPE-X</Text>
+      <View style={styles.background}>
+        <Animated.View
+          style={[
+            styles.blob1,
+            {
+              transform: [{ translateY: move1 }],
+            },
+          ]}
+        />
 
-          <Text style={styles.user}>{username}</Text>
+        <Animated.View
+          style={[
+            styles.blob2,
+            {
+              transform: [{ translateY: move2 }],
+            },
+          ]}
+        />
+      </View>
+
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <View style={styles.header}>
+          <Text style={styles.logoSmall}>
+            TYPE-X
+          </Text>
+
+          <Text style={styles.user}>
+            {username}
+          </Text>
         </View>
 
         {/* MODE */}
@@ -309,7 +615,6 @@ export default function App() {
               ]}
               onPress={() => {
                 setMode(m);
-
                 resetSession(m, time);
               }}
             >
@@ -333,22 +638,22 @@ export default function App() {
               ]}
               onPress={() => {
                 setTime(t);
-
                 resetSession(mode, t);
               }}
             >
-              <Text style={styles.btnText}>{t}s</Text>
+              <Text style={styles.btnText}>
+                {t}s
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* START BUTTON */}
+        {/* START */}
         <TouchableOpacity
           style={styles.startBtn}
           onPress={() => {
             resetSession();
-
-            startTest();
+            setStarted(true);
           }}
         >
           <Text style={styles.startText}>
@@ -358,12 +663,7 @@ export default function App() {
 
         {/* TIMER */}
         {started && !finished && (
-          <Text
-            style={[
-              styles.timer,
-              timeLeft <= 10 && { color: "#ff4d6d" },
-            ]}
-          >
+          <Text style={styles.timer}>
             {timeLeft}s
           </Text>
         )}
@@ -374,7 +674,8 @@ export default function App() {
             {visibleWords.map((word, i) => {
               const globalIndex = windowStart + i;
 
-              const typedWord = typedWords[globalIndex];
+              const typedWord =
+                typedWords[globalIndex];
 
               let color = "#777";
 
@@ -385,12 +686,17 @@ export default function App() {
                     : "#ff4d6d";
               }
 
-              if (globalIndex === typedWords.length) {
+              if (
+                globalIndex === typedWords.length
+              ) {
                 color = "#fff";
               }
 
               return (
-                <Text key={i} style={{ color }}>
+                <Text
+                  key={i}
+                  style={{ color }}
+                >
                   {word + " "}
                 </Text>
               );
@@ -405,7 +711,10 @@ export default function App() {
             style={styles.realInput}
             value={typed}
             onChangeText={(text) => {
-              if (!started && text.length > 0) {
+              if (
+                !started &&
+                text.length > 0
+              ) {
                 setStarted(true);
               }
 
@@ -418,7 +727,9 @@ export default function App() {
         {/* RESULT */}
         {finished && (
           <View style={styles.result}>
-            <Text style={styles.resultTitle}>DONE</Text>
+            <Text style={styles.resultTitle}>
+              DONE
+            </Text>
 
             <Text style={styles.resultText}>
               WPM: {wpm}
@@ -434,7 +745,7 @@ export default function App() {
         {finished && (
           <View style={styles.result}>
             <Text style={styles.resultTitle}>
-              🏆 LEADERBOARD
+              🏆 TOP 5
             </Text>
 
             {leaderboard.map((item, index) => (
@@ -442,9 +753,37 @@ export default function App() {
                 key={item.id}
                 style={styles.resultText}
               >
-                {index + 1}. {item.username} — {item.wpm} WPM —
-                {" "}
-                {item.accuracy}%
+                #{index + 1} {item.username}
+              </Text>
+            ))}
+          </View>
+        )}
+
+        {/* TYPERS */}
+        <TouchableOpacity
+          style={styles.typersBtn}
+          onPress={async () => {
+            await fetchTypers();
+            setShowTypers(!showTypers);
+          }}
+        >
+          <Text style={styles.buttonText}>
+            TYPERS
+          </Text>
+        </TouchableOpacity>
+
+        {showTypers && (
+          <View style={styles.result}>
+            <Text style={styles.resultTitle}>
+              👥 ALL TYPERS
+            </Text>
+
+            {allTypers.map((item) => (
+              <Text
+                key={item.id}
+                style={styles.resultText}
+              >
+                {item.username}
               </Text>
             ))}
           </View>
@@ -455,101 +794,163 @@ export default function App() {
 }
 
 // ================= STYLES =================
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0b1020",
+    backgroundColor: "#050816",
+  },
+
+  background: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+  },
+
+  blob1: {
+    position: "absolute",
+    width: 260,
+    height: 260,
+    backgroundColor: "rgba(0,255,204,0.18)",
+    borderRadius: 200,
+    top: -50,
+    left: -60,
+  },
+
+  blob2: {
+    position: "absolute",
+    width: 300,
+    height: 300,
+    backgroundColor: "rgba(124,58,237,0.20)",
+    borderRadius: 300,
+    bottom: -80,
+    right: -80,
   },
 
   center: {
     flex: 1,
     justifyContent: "center",
-    padding: 20,
+    padding: 24,
+    zIndex: 10,
   },
 
   logo: {
-    color: "#00ffcc",
-    fontSize: 34,
+    color: "#ffffff",
+    fontSize: 42,
     fontWeight: "900",
+    textAlign: "center",
+    marginBottom: 24,
+    letterSpacing: 4,
+  },
+
+  logoSmall: {
+    color: "#ffffff",
+    fontSize: 28,
+    fontWeight: "900",
+    letterSpacing: 2,
   },
 
   card: {
-    marginTop: 20,
-    backgroundColor: "#141b34",
-    padding: 20,
-    borderRadius: 20,
-  },
-
-  title: {
-    color: "#fff",
-    fontSize: 22,
-    marginBottom: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    padding: 22,
+    borderRadius: 28,
   },
 
   input: {
-    backgroundColor: "#1c2440",
-    padding: 15,
-    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    padding: 16,
+    borderRadius: 18,
     color: "#fff",
-    marginBottom: 15,
+    marginBottom: 14,
+    fontSize: 16,
+  },
+
+  errorText: {
+    color: "#ff6b81",
+    marginBottom: 10,
+    fontWeight: "600",
   },
 
   button: {
-    backgroundColor: "#00ffcc",
-    padding: 15,
-    borderRadius: 15,
+    backgroundColor: "rgba(0,255,204,0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(0,255,204,0.3)",
+    padding: 16,
+    borderRadius: 18,
     alignItems: "center",
   },
 
   buttonText: {
+    color: "#ffffff",
     fontWeight: "900",
-    color: "#0b1020",
+    letterSpacing: 1,
+    fontSize: 15,
+  },
+
+  link: {
+    color: "#00ffcc",
+    textAlign: "center",
+    marginTop: 18,
+    fontWeight: "600",
   },
 
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 20,
+    alignItems: "center",
+    marginBottom: 25,
   },
 
   user: {
     color: "#00ffcc",
     fontWeight: "700",
+    fontSize: 16,
   },
 
   label: {
     color: "#fff",
-    marginVertical: 10,
+    marginVertical: 12,
+    fontWeight: "700",
+    fontSize: 16,
   },
 
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
+    gap: 10,
   },
 
   modeBtn: {
-    width: "30%",
-    backgroundColor: "#141b34",
-    padding: 12,
-    borderRadius: 12,
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    padding: 14,
+    borderRadius: 16,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
 
   timeBtn: {
-    width: "18%",
-    backgroundColor: "#141b34",
-    padding: 10,
-    borderRadius: 12,
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    padding: 12,
+    borderRadius: 16,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
 
   activeMode: {
-    backgroundColor: "#00ffcc",
+    backgroundColor: "rgba(0,255,204,0.25)",
+    borderColor: "#00ffcc",
   },
 
   activeTime: {
-    backgroundColor: "#7c3aed",
+    backgroundColor: "rgba(124,58,237,0.3)",
+    borderColor: "#7c3aed",
   },
 
   btnText: {
@@ -558,62 +959,87 @@ const styles = StyleSheet.create({
   },
 
   startBtn: {
-    backgroundColor: "#00ffcc",
-    padding: 15,
-    borderRadius: 15,
-    marginVertical: 20,
+    backgroundColor: "rgba(0,255,204,0.18)",
+    padding: 18,
+    borderRadius: 20,
+    marginVertical: 22,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(0,255,204,0.4)",
+  },
+
+  typersBtn: {
+    backgroundColor: "rgba(124,58,237,0.25)",
+    padding: 16,
+    borderRadius: 20,
+    marginTop: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(124,58,237,0.35)",
   },
 
   startText: {
     fontWeight: "900",
-    color: "#0b1020",
+    color: "#ffffff",
+    fontSize: 16,
+    letterSpacing: 1,
   },
 
   timer: {
     textAlign: "center",
-    fontSize: 28,
+    fontSize: 34,
     fontWeight: "900",
     color: "#00ffcc",
-    marginBottom: 10,
+    marginBottom: 14,
   },
 
   karaokeBox: {
-    backgroundColor: "#141b34",
-    padding: 20,
-    borderRadius: 20,
-    minHeight: 120,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    padding: 24,
+    borderRadius: 28,
+    minHeight: 140,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
   },
 
   text: {
-    fontSize: 26,
-    lineHeight: 42,
+    fontSize: 28,
+    lineHeight: 44,
+    fontWeight: "600",
   },
 
   realInput: {
-    backgroundColor: "#1c2440",
+    backgroundColor: "rgba(255,255,255,0.08)",
     color: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    marginTop: 15,
+    padding: 16,
+    borderRadius: 18,
+    marginTop: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    fontSize: 16,
   },
 
   result: {
-    marginTop: 20,
-    backgroundColor: "#141b34",
-    padding: 20,
-    borderRadius: 20,
+    marginTop: 22,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    padding: 24,
+    borderRadius: 28,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
   },
 
   resultTitle: {
     color: "#00ffcc",
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "900",
+    marginBottom: 8,
   },
 
   resultText: {
     color: "#fff",
-    marginTop: 5,
+    marginTop: 6,
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
