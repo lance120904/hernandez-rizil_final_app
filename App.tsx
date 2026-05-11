@@ -13,6 +13,7 @@ import {
 } from "react-native";
 
 import { supabase } from "./src/screens/connection/supabase-client";
+import { Video } from "expo-av";
 
 // ================= WORDS =================
 const wordsList = {
@@ -67,6 +68,9 @@ export default function App() {
   const [showTypers, setShowTypers] = useState(false);
 
   const [allTypers, setAllTypers] = useState<any[]>([]);
+
+  const [showVideo, setShowVideo] = useState(false);
+const [resultVideo, setResultVideo] = useState<any>(null);
 
   // ================= WINDOW =================
   const [windowStart, setWindowStart] = useState(0);
@@ -294,10 +298,13 @@ export default function App() {
 
           saveScore(finalWpm, finalAccuracy);
 
-          setFinished(true);
-          setStarted(false);
+setResultVideo(getResultVideo(finalWpm, finalAccuracy));
+setShowVideo(true);
 
-          fetchLeaderboard();
+setFinished(true);
+setStarted(false);
+
+fetchLeaderboard();
 
           return 0;
         }
@@ -571,6 +578,26 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
 
+ {showVideo && (
+      <View style={styles.videoOverlay}>
+        <TouchableOpacity
+          style={styles.closeBtn}
+          onPress={() => setShowVideo(false)}
+        >
+          <Text style={{ color: "#fff" }}>✕</Text>
+        </TouchableOpacity>
+
+        <Video
+          source={resultVideo}
+          style={styles.video}
+          resizeMode="cover"
+          shouldPlay
+          isLooping
+          isMuted={false}
+        />
+      </View>
+    )}
+
       <View style={styles.background}>
         <Animated.View
           style={[
@@ -793,6 +820,19 @@ export default function App() {
   );
 }
 
+// ================= VEDIOS =================
+
+const getResultVideo = (wpm: number, accuracy: number) => {
+  if (wpm >= 40 && accuracy >= 90) {
+    return require("./assets/videos/0511.mp4");
+  }
+
+  if (wpm >= 25) {
+    return require("./assets/videos/0511(1).mp4");
+  }
+
+  return require("./assets/videos/0511(2).mp4");
+};
 // ================= STYLES =================
 const styles = StyleSheet.create({
   container: {
@@ -1042,4 +1082,32 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
+  videoOverlay: {
+  position: "absolute",
+  top: 120,
+  left: 20,
+  right: 20,
+  height: 220,
+  borderRadius: 20,
+  overflow: "hidden",
+  backgroundColor: "rgba(0,0,0,0.6)",
+  borderWidth: 1,
+  borderColor: "rgba(255,255,255,0.2)",
+  zIndex: 999,
+},
+
+video: {
+  width: "100%",
+  height: "100%",
+},
+
+closeBtn: {
+  position: "absolute",
+  top: 10,
+  right: 10,
+  zIndex: 1000,
+  backgroundColor: "rgba(0,0,0,0.5)",
+  padding: 6,
+  borderRadius: 20,
+},
 });
