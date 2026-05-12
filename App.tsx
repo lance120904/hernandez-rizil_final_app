@@ -72,16 +72,23 @@ export default function App() {
   const [showVideo, setShowVideo] = useState(false);
 const [resultVideo, setResultVideo] = useState<any>(null);
 
+const [finalWpm, setFinalWpm] = useState(0);
+const [finalAccuracy, setFinalAccuracy] = useState(100);
+
   // ================= WINDOW =================
   const [windowStart, setWindowStart] = useState(0);
 
   const WINDOW_SIZE = 12;
 
   const typedWords = typed.trim().split(/\s+/).filter(Boolean);
-
+  
+  useEffect(() => {
+  typedRef.current = typed;
+}, [typed]);
   // ================= ANIMATION =================
   const floatAnim1 = useRef(new Animated.Value(0)).current;
   const floatAnim2 = useRef(new Animated.Value(0)).current;
+  const typedRef = useRef("");
 
   useEffect(() => {
     Animated.loop(
@@ -270,51 +277,72 @@ const [resultVideo, setResultVideo] = useState<any>(null);
   };
 
   // ================= TIMER =================
-  useEffect(() => {
-    if (!started || finished) return;
+ useEffect(() => {
+  if (!started || finished) return;
 
-    const interval = setInterval(() => {
-      setTimeLeft((t) => {
-        if (t <= 1) {
-          clearInterval(interval);
+  const interval = setInterval(() => {
+    setTimeLeft((t) => {
+      if (t <= 1) {
+        clearInterval(interval);
 
-          const finalWpm = typed.trim()
-            ? typed.trim().split(/\s+/).length
-            : 0;
+        const latestTyped = typedRef.current;
 
-          let correct = 0;
+        const calculatedWpm = latestTyped.trim()
+          ? latestTyped.trim().split(/\s+/).length
+          : 0;
 
-          const fullText = words.join(" ");
+        let correct = 0;
 
-          for (let i = 0; i < typed.length; i++) {
-            if (typed[i] === fullText[i]) {
-              correct++;
-            }
+        const fullText = words.join(" ");
+
+        for (let i = 0; i < latestTyped.length; i++) {
+          if (latestTyped[i] === fullText[i]) {
+            correct++;
           }
-
-          const finalAccuracy = typed.length
-            ? Math.floor((correct / typed.length) * 100)
-            : 100;
-
-          saveScore(finalWpm, finalAccuracy);
-
-setResultVideo(getResultVideo(finalWpm, finalAccuracy));
-setShowVideo(true);
-
-setFinished(true);
-setStarted(false);
-
-fetchLeaderboard();
-
-          return 0;
         }
 
-        return t - 1;
-      });
-    }, 1000);
+        const calculatedAccuracy = latestTyped.length
+          ? Math.floor(
+              (correct / latestTyped.length) * 100
+            )
+          : 100;
 
-    return () => clearInterval(interval);
-  }, [started, finished]);
+        console.log(
+          "Saving WPM:",
+          calculatedWpm
+        );
+
+        setFinalWpm(calculatedWpm);
+        setFinalAccuracy(calculatedAccuracy);
+
+        saveScore(
+          calculatedWpm,
+          calculatedAccuracy
+        );
+
+        setResultVideo(
+          getResultVideo(
+            calculatedWpm,
+            calculatedAccuracy
+          )
+        );
+
+        setShowVideo(true);
+
+        setFinished(true);
+        setStarted(false);
+
+        fetchLeaderboard();
+
+        return 0;
+      }
+
+      return t - 1;
+    });
+  }, 1000);
+
+  return () => clearInterval(interval);
+}, [started, finished, words]);
 
   // ================= AUTO SCROLL =================
   useEffect(() => {
@@ -326,28 +354,32 @@ fetchLeaderboard();
   }, [typedWords.length]);
 
   // ================= RESET =================
-  const resetSession = (
-    newMode?: keyof typeof wordsList,
-    newTime?: number
-  ) => {
-    const finalMode = newMode ?? mode;
+ const resetSession = (
+  newMode?: keyof typeof wordsList,
+  newTime?: number
+) => {
+  const finalMode = newMode ?? mode;
 
-    const finalTime = newTime ?? time;
+  const finalTime = newTime ?? time;
 
-    setStarted(false);
+  setStarted(false);
 
-    setFinished(false);
+  setFinished(false);
 
-    setTyped("");
+  setTyped("");
 
-    setTimeLeft(finalTime);
+  setTimeLeft(finalTime);
 
-    setWords(generateWords(finalMode));
+  setWords(generateWords(finalMode));
 
-    setWindowStart(0);
+  setWindowStart(0);
 
-    setInputKey((k) => k + 1);
-  };
+  setInputKey((k) => k + 1);
+
+  setFinalWpm(0);
+
+  setFinalAccuracy(100);
+};
 
   // ================= WPM =================
   const wpm = useMemo(() => {
@@ -587,13 +619,14 @@ fetchLeaderboard();
           <Text style={{ color: "#fff" }}>✕</Text>
         </TouchableOpacity>
 
+        <View style={styles.videoWrapper}></View>
         <Video
           source={resultVideo}
           style={styles.video}
-          resizeMode="cover"
+          resizeMode="contain"
           shouldPlay
           isLooping
-          isMuted={false}
+          useNativeControls
         />
       </View>
     )}
@@ -759,11 +792,11 @@ fetchLeaderboard();
             </Text>
 
             <Text style={styles.resultText}>
-              WPM: {wpm}
+              WPM: {finalWpm}
             </Text>
 
             <Text style={styles.resultText}>
-              Accuracy: {accuracy}%
+              Accuracy: {finalAccuracy}%
             </Text>
           </View>
         )}
@@ -820,17 +853,19 @@ fetchLeaderboard();
   );
 }
 
-// ================= VEDIOS =================
+// ================= Videos =================
 
 const getResultVideo = (wpm: number, accuracy: number) => {
-  if (wpm >= 40 && accuracy >= 90) {
+  if (wpm >= 20 && accuracy >= 90) {
     return require("./assets/videos/0511.mp4");
   }
-
-  if (wpm >= 25) {
-    return require("./assets/videos/0511(1).mp4");
+ if (wpm >= 15 && accuracy >= 90) {
+    return require("./assets/videos/meme.mp4");
   }
 
+  if (wpm >= 10 && accuracy >= 50){
+    return require("./assets/videos/0511(1).mp4");
+  }
   return require("./assets/videos/0511(2).mp4");
 };
 // ================= STYLES =================
@@ -1082,25 +1117,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  videoOverlay: {
+videoOverlay: {
   position: "absolute",
-  top: 120,
+  top: 100,
   left: 20,
   right: 20,
-  height: 220,
+
+  backgroundColor: "rgba(0,0,0,0.85)",
   borderRadius: 20,
+
   overflow: "hidden",
-  backgroundColor: "rgba(0,0,0,0.6)",
-  borderWidth: 1,
-  borderColor: "rgba(255,255,255,0.2)",
   zIndex: 999,
+
+  height: 260,
+
+  justifyContent: "center",
+  alignItems: "center",
+},
+videoWrapper: {
+  width: "100%",
+  height: "100%",
+  justifyContent: "center",
+  alignItems: "center",
 },
 
 video: {
   width: "100%",
   height: "100%",
 },
-
 closeBtn: {
   position: "absolute",
   top: 10,
