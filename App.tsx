@@ -10,10 +10,12 @@ import {
   StatusBar,
   ScrollView,
   Animated,
+  Dimensions,
 } from "react-native";
 
 import { supabase } from "./src/screens/connection/supabase-client";
 import { Video } from "expo-av";
+const { width } = Dimensions.get("window");
 
 // ================= WORDS =================
 const wordsList = {
@@ -610,25 +612,30 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
 
- {showVideo && (
-      <View style={styles.videoOverlay}>
-        <TouchableOpacity
-          style={styles.closeBtn}
-          onPress={() => setShowVideo(false)}
-        >
-          <Text style={{ color: "#fff" }}>✕</Text>
-        </TouchableOpacity>
+{showVideo && (
+  <View style={styles.videoOverlay}>
+    <TouchableOpacity
+      style={styles.closeBtn}
+      onPress={() => setShowVideo(false)}
+    >
+      <Text style={{ color: "#fff" }}>✕</Text>
+    </TouchableOpacity>
 
-        <View style={styles.videoWrapper}></View>
-        <Video
-          source={resultVideo}
-          style={styles.video}
-          resizeMode="contain"
-          shouldPlay
-          isLooping
-          useNativeControls
-        />
-      </View>
+    <View style={styles.videoWrapper}>
+      <Video
+  source={resultVideo}
+  style={{
+    width: 320,
+    height: 180,
+  }}
+  resizeMode="contain"
+  shouldPlay
+  isLooping
+  useNativeControls
+/>
+    </View>
+  </View>
+)}
     )}
 
       <View style={styles.background}>
@@ -1119,32 +1126,32 @@ const styles = StyleSheet.create({
   },
 videoOverlay: {
   position: "absolute",
-  top: 100,
-  left: 20,
-  right: 20,
+  bottom: 20,
+  alignSelf: "center",
 
-  backgroundColor: "rgba(0,0,0,0.85)",
+  width: 320,
+  height: 180, // 16:9 ratio
+
+  backgroundColor: "#000",
   borderRadius: 20,
-
   overflow: "hidden",
   zIndex: 999,
-
-  height: 260,
-
-  justifyContent: "center",
-  alignItems: "center",
 },
+
 videoWrapper: {
   width: "100%",
   height: "100%",
-  justifyContent: "center",
-  alignItems: "center",
 },
 
 video: {
   width: "100%",
   height: "100%",
 },
+
+video: {
+  flex: 1,
+},
+
 closeBtn: {
   position: "absolute",
   top: 10,
