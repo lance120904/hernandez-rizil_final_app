@@ -1,4 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Modal from "react-native-modal";
+import ConfettiCannon from "react-native-confetti-cannon";
+import { Audio } from "expo-av";
+
 
 import {
   SafeAreaView,
@@ -14,8 +18,6 @@ import {
 } from "react-native";
 
 import { supabase } from "./src/screens/connection/supabase-client";
-import { Video } from "expo-av";
-const { width } = Dimensions.get("window");
 
 // ================= WORDS =================
 const wordsList = {
@@ -36,7 +38,35 @@ const generateWords = (mode: keyof typeof wordsList) => {
     () => source[Math.floor(Math.random() * source.length)]
   );
 };
+// ================= THEMES =================
+const themes = {
+  easy: {
+    primary: "#00ff99",
+    secondary: "#00cc66",
+    blob1: "rgba(0,255,153,0.18)",
+    blob2: "rgba(0,204,102,0.18)",
+    button: "rgba(0,255,153,0.20)",
+    border: "#00ff99",
+  },
 
+  hard: {
+    primary: "#ff3b30",
+    secondary: "#ff6b6b",
+    blob1: "rgba(255,59,48,0.22)",
+    blob2: "rgba(255,107,107,0.18)",
+    button: "rgba(255,59,48,0.20)",
+    border: "#ff3b30",
+  },
+
+  insane: {
+    primary: "#a855f7",
+    secondary: "#7c3aed",
+    blob1: "rgba(168,85,247,0.20)",
+    blob2: "rgba(124,58,237,0.22)",
+    button: "rgba(168,85,247,0.22)",
+    border: "#a855f7",
+  },
+};
 export default function App() {
   // ================= AUTH =================
   const [screen, setScreen] = useState<
@@ -51,6 +81,8 @@ export default function App() {
   // ================= APP =================
   const [mode, setMode] =
     useState<keyof typeof wordsList>("easy");
+
+    const currentTheme = themes[mode];
 
   const [time, setTime] = useState(30);
 
@@ -71,11 +103,11 @@ export default function App() {
 
   const [allTypers, setAllTypers] = useState<any[]>([]);
 
-  const [showVideo, setShowVideo] = useState(false);
-const [resultVideo, setResultVideo] = useState<any>(null);
-
 const [finalWpm, setFinalWpm] = useState(0);
 const [finalAccuracy, setFinalAccuracy] = useState(100);
+
+const [showResultModal, setShowResultModal] = useState(false);
+const [resultMessage, setResultMessage] = useState("");
 
   // ================= WINDOW =================
   const [windowStart, setWindowStart] = useState(0);
@@ -84,9 +116,41 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
 
   const typedWords = typed.trim().split(/\s+/).filter(Boolean);
   
+useEffect(() => {
+  fetchLeaderboard();
+}, []);
+
   useEffect(() => {
   typedRef.current = typed;
 }, [typed]);
+
+  // ================= ANIMATION =================
+  const playVoiceFeedback = async (accuracy: number) => {
+  try {
+    let audioFile;
+
+    if (accuracy >= 80) {
+      audioFile = require("./assets/audio/good.mp3");
+    } else if (accuracy >= 50) {
+      audioFile = require("./assets/audio/bad.mp3");
+    } else {
+      audioFile = require("./assets/audio/bobo.mp3");
+    }
+
+    const { sound } =
+await Audio.Sound.createAsync(audioFile);
+
+sound.setOnPlaybackStatusUpdate((status) => {
+  if (status.isLoaded && status.didJustFinish) {
+    sound.unloadAsync();
+  }
+});
+
+await sound.playAsync();
+  } catch (error) {
+    console.log(error);
+  }
+};
   // ================= ANIMATION =================
   const floatAnim1 = useRef(new Animated.Value(0)).current;
   const floatAnim2 = useRef(new Animated.Value(0)).current;
@@ -172,7 +236,9 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
         return;
       }
 
-      setScreen("app");
+      setUsername("");
+setPassword("");
+setScreen("login");
     } catch (err) {
       console.log(err);
     }
@@ -238,16 +304,20 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
       }
 
       if (finalWpm > oldScore.wpm) {
-        await supabase
-          .from("typing_scores")
-          .update({
-            wpm: finalWpm,
-            accuracy: finalAccuracy,
-            mode,
-            time_limit: time,
-          })
-          .eq("username", cleanUsername);
-      }
+  const { error } = await supabase
+    .from("typing_scores")
+    .update({
+      wpm: finalWpm,
+      accuracy: finalAccuracy,
+      mode,
+      time_limit: time,
+    })
+    .eq("username", cleanUsername);
+
+  if (error) {
+    console.log(error);
+  }
+}
     } catch (err) {
       console.log(err);
     }
@@ -258,7 +328,7 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
     const { data } = await supabase
       .from("typing_scores")
       .select("*")
-      .order("wpm", { ascending: false })
+      .order("accuracy", { ascending: false })
       .limit(5);
 
     if (data) {
@@ -289,10 +359,13 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
 
         const latestTyped = typedRef.current;
 
-        const calculatedWpm = latestTyped.trim()
-          ? latestTyped.trim().split(/\s+/).length
-          : 0;
+        const typedWords = latestTyped.trim()
+  ? latestTyped.trim().split(/\s+/).length
+  : 0;
 
+const calculatedWpm = Math.round(
+  typedWords / (time / 60)
+);
         let correct = 0;
 
         const fullText = words.join(" ");
@@ -304,32 +377,35 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
         }
 
         const calculatedAccuracy = latestTyped.length
-          ? Math.floor(
-              (correct / latestTyped.length) * 100
-            )
-          : 100;
+  ? Math.max(
+      0,
+      Math.min(
+        100,
+        Math.floor(
+          (correct / latestTyped.length) * 100
+        )
+      )
+    )
+  : 100;
 
-        console.log(
-          "Saving WPM:",
-          calculatedWpm
-        );
+       setFinalWpm(calculatedWpm);
+setFinalAccuracy(calculatedAccuracy);
 
-        setFinalWpm(calculatedWpm);
-        setFinalAccuracy(calculatedAccuracy);
+if (calculatedWpm >= 40) {
+  setResultMessage("Excellent! You're a typing master!");
+} else if (calculatedWpm >= 20) {
+  setResultMessage("ARAY KO!!.");
+} else {
+  setResultMessage("MGA BOBO!");
+}
 
-        saveScore(
-          calculatedWpm,
-          calculatedAccuracy
-        );
+setShowResultModal(true);
 
-        setResultVideo(
-          getResultVideo(
-            calculatedWpm,
-            calculatedAccuracy
-          )
-        );
+playVoiceFeedback(calculatedAccuracy);
 
-        setShowVideo(true);
+        saveScore(calculatedWpm, calculatedAccuracy)
+  .then(() => fetchLeaderboard())
+  .catch(console.log);
 
         setFinished(true);
         setStarted(false);
@@ -364,6 +440,9 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
 
   const finalTime = newTime ?? time;
 
+  setShowResultModal(false);
+setResultMessage("");
+
   setStarted(false);
 
   setFinished(false);
@@ -384,12 +463,15 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
 };
 
   // ================= WPM =================
-  const wpm = useMemo(() => {
-    if (!typed.trim()) return 0;
+const wpm = useMemo(() => {
+  if (!typed.trim()) return 0;
 
-    return typed.trim().split(/\s+/).length;
-  }, [typed]);
+  const typedWords = typed.trim().split(/\s+/).length;
 
+  return Math.round(
+    typedWords / (time / 60)
+  );
+}, [typed, time]);
   // ================= ACCURACY =================
   const accuracy = useMemo(() => {
     if (!typed.length) return 100;
@@ -419,17 +501,22 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
       <SafeAreaView style={styles.container}>
         <View style={styles.background}>
           <Animated.View
-            style={[
-              styles.blob1,
-              {
-                transform: [{ translateY: move1 }],
-              },
-            ]}
-          />
-
+  style={[
+    styles.blob1,
+    {
+      backgroundColor: currentTheme.blob1,
+    },
+    {
+      transform: [{ translateY: move1 }],
+    },
+  ]}
+/>  
           <Animated.View
             style={[
               styles.blob2,
+{
+  backgroundColor: currentTheme.blob2,
+},
               {
                 transform: [{ translateY: move2 }],
               },
@@ -438,7 +525,14 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
         </View>
 
         <View style={styles.center}>
-          <Text style={styles.logo}>TYPE-X</Text>
+          <Text
+  style={[
+    styles.logoSmall,
+    {
+      color: currentTheme.primary,
+    },
+  ]}
+>TYPE-X</Text>
 
           <TouchableOpacity
             style={styles.button}
@@ -478,7 +572,14 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
         </View>
 
         <View style={styles.center}>
-          <Text style={styles.logo}>LOGIN</Text>
+          <Text
+  style={[
+    styles.logoSmall,
+    {
+      color: currentTheme.primary,
+    },
+  ]}
+>LOGIN</Text>
 
           <View style={styles.card}>
             <TextInput
@@ -555,7 +656,14 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
         </View>
 
         <View style={styles.center}>
-          <Text style={styles.logo}>REGISTER</Text>
+          <Text
+  style={[
+    styles.logoSmall,
+    {
+      color: currentTheme.primary,
+    },
+  ]}
+>REGISTER</Text>
 
           <View style={styles.card}>
             <TextInput
@@ -612,32 +720,6 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-{showVideo && (
-  <View style={styles.videoOverlay}>
-    <TouchableOpacity
-      style={styles.closeBtn}
-      onPress={() => setShowVideo(false)}
-    >
-      <Text style={{ color: "#fff" }}>✕</Text>
-    </TouchableOpacity>
-
-    <View style={styles.videoWrapper}>
-      <Video
-  source={resultVideo}
-  style={{
-    width: 320,
-    height: 180,
-  }}
-  resizeMode="contain"
-  shouldPlay
-  isLooping
-  useNativeControls
-/>
-    </View>
-  </View>
-)}
-    )}
-
       <View style={styles.background}>
         <Animated.View
           style={[
@@ -660,7 +742,14 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
 
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <View style={styles.header}>
-          <Text style={styles.logoSmall}>
+          <Text
+  style={[
+    styles.logoSmall,
+    {
+      color: currentTheme.primary,
+    },
+  ]}
+>
             TYPE-X
           </Text>
 
@@ -678,7 +767,10 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
               key={m}
               style={[
                 styles.modeBtn,
-                mode === m && styles.activeMode,
+                mode === m && {
+  backgroundColor: currentTheme.button,
+  borderColor: currentTheme.border,
+}
               ]}
               onPress={() => {
                 setMode(m);
@@ -717,7 +809,15 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
 
         {/* START */}
         <TouchableOpacity
-          style={styles.startBtn}
+  disabled={started}
+  style={[
+  styles.startBtn,
+  {
+    backgroundColor: currentTheme.button,
+    borderColor: currentTheme.border,
+  },
+  started && { opacity: 0.5 },
+]}
           onPress={() => {
             resetSession();
             setStarted(true);
@@ -730,7 +830,14 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
 
         {/* TIMER */}
         {started && !finished && (
-          <Text style={styles.timer}>
+          <Text
+  style={[
+    styles.timer,
+    {
+      color: currentTheme.primary,
+    },
+  ]}
+>
             {timeLeft}s
           </Text>
         )}
@@ -774,6 +881,7 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
         {/* INPUT */}
         {!finished && (
           <TextInput
+            editable={!finished}
             key={inputKey}
             style={styles.realInput}
             value={typed}
@@ -792,39 +900,109 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
         )}
 
         {/* RESULT */}
-        {finished && (
-          <View style={styles.result}>
-            <Text style={styles.resultTitle}>
-              DONE
-            </Text>
+        {/* RESULT */}
+{finished && (
+  <View
+    style={[
+      styles.result,
+      {
+        borderColor: currentTheme.border,
+      },
+    ]}
+  >
+    <Text
+      style={[
+        styles.resultTitle,
+        {
+          color: currentTheme.primary,
+        },
+      ]}
+    >
+      DONE
+    </Text>
 
-            <Text style={styles.resultText}>
-              WPM: {finalWpm}
-            </Text>
+    <Text style={styles.resultText}>
+      WPM: {finalWpm}
+    </Text>
 
-            <Text style={styles.resultText}>
-              Accuracy: {finalAccuracy}%
-            </Text>
-          </View>
-        )}
+    <Text style={styles.resultText}>
+      Accuracy: {finalAccuracy}%
+    </Text>
+  </View>
+)}
 
         {/* LEADERBOARD */}
         {finished && (
           <View style={styles.result}>
-            <Text style={styles.resultTitle}>
-              🏆 TOP 5
-            </Text>
+  <Text
+  style={[
+    styles.resultTitle,
+    {
+      color: currentTheme.primary,
+    },
+  ]}
+>
+    🏆 TOP 5
+  </Text>
 
-            {leaderboard.map((item, index) => (
-              <Text
-                key={item.id}
-                style={styles.resultText}
-              >
-                #{index + 1} {item.username}
-              </Text>
-            ))}
-          </View>
-        )}
+  {leaderboard.map((item, index) => {
+
+  const medal =
+    index === 0 ? "🥇" :
+    index === 1 ? "🥈" :
+    index === 2 ? "🥉" : "🏅";
+
+  const medalColor =
+    index === 0 ? "#FFD700" :
+    index === 1 ? "#C0C0C0" :
+    index === 2 ? "#CD7F32" :
+    "#00ffcc";
+
+  return (
+
+    <View
+      key={item.id}
+      style={[
+        styles.rankCard,
+        {
+          borderColor: medalColor,
+        },
+      ]}
+    >
+
+      <Text
+        style={[
+          styles.rankTitle,
+          {
+            color: medalColor,
+          },
+        ]}
+      >
+        {medal} #{index + 1}
+      </Text>
+
+      <Text style={styles.rankName}>
+        {item.username}
+      </Text>
+
+      <View style={styles.rankStats}>
+
+        <Text style={styles.rankValue}>
+          🎯 {item.accuracy}%
+        </Text>
+
+        <Text style={styles.rankValue}>
+          ⚡ {item.wpm} WPM
+        </Text>
+
+      </View>
+
+    </View>
+
+  );
+})}
+</View>
+)}
 
         {/* TYPERS */}
         <TouchableOpacity
@@ -855,28 +1033,133 @@ const [finalAccuracy, setFinalAccuracy] = useState(100);
             ))}
           </View>
         )}
-      </ScrollView>
+            </ScrollView>
+
+      {/* RESULT MODAL */}
+      <Modal
+        isVisible={showResultModal}
+        animationIn="zoomIn"
+        animationOut="zoomOut"
+        backdropOpacity={0.8}
+      >
+        <View
+          style={{
+            backgroundColor: "#111827",
+            padding: 30,
+            borderRadius: 25,
+            alignItems: "center",
+            borderWidth: 1,
+            borderColor: "#00ffcc",
+          }}
+        >
+          <ConfettiCannon
+            count={150}
+            origin={{ x: -10, y: 0 }}
+            fadeOut
+          />
+
+          <Text
+            style={{
+              color: "#00ffcc",
+              fontSize: 30,
+              fontWeight: "900",
+            }}
+          >
+            🎉 RESULT
+          </Text>
+
+          <Text
+            style={{
+              color: "#fff",
+              fontSize: 22,
+              marginTop: 15,
+            }}
+          >
+            WPM: {finalWpm}
+          </Text>
+
+          <Text
+            style={{
+              color: "#fff",
+              fontSize: 22,
+            }}
+          >
+            Accuracy: {finalAccuracy}%
+          </Text>
+
+          <Text
+            style={{
+              color: "#FFD700",
+              fontSize: 18,
+              marginTop: 20,
+              textAlign: "center",
+            }}
+          >
+            {resultMessage}
+          </Text>
+
+          <TouchableOpacity
+            style={{
+              marginTop: 20,
+              backgroundColor: "#00ffcc",
+              paddingHorizontal: 30,
+              paddingVertical: 12,
+              borderRadius: 20,
+            }}
+            onPress={() => setShowResultModal(false)}
+          >
+            <Text
+              style={{
+                color: "#000",
+                fontWeight: "900",
+              }}
+            >
+              CLOSE
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
-
-// ================= Videos =================
-
-const getResultVideo = (wpm: number, accuracy: number) => {
-  if (wpm >= 20 && accuracy >= 90) {
-    return require("./assets/videos/0511.mp4");
-  }
- if (wpm >= 15 && accuracy >= 90) {
-    return require("./assets/videos/meme.mp4");
-  }
-
-  if (wpm >= 10 && accuracy >= 50){
-    return require("./assets/videos/0511(1).mp4");
-  }
-  return require("./assets/videos/0511(2).mp4");
-};
 // ================= STYLES =================
+
+
 const styles = StyleSheet.create({
+
+rankCard: {
+  backgroundColor: "rgba(255,255,255,0.05)",
+  borderWidth: 2,
+  borderRadius: 20,
+  padding: 18,
+  marginTop: 15,
+},
+
+rankTitle: {
+  fontSize: 24,
+  fontWeight: "900",
+},
+
+rankName: {
+  color: "#fff",
+  fontSize: 20,
+  fontWeight: "800",
+  marginTop: 8,
+},
+
+rankStats: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  marginTop: 15,
+},
+
+rankValue: {
+  color: "#ffffff",
+  fontSize: 16,
+  fontWeight: "700",
+},
+
   container: {
     flex: 1,
     backgroundColor: "#050816",
@@ -1124,41 +1407,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-videoOverlay: {
-  position: "absolute",
-  bottom: 20,
-  alignSelf: "center",
-
-  width: 320,
-  height: 180, // 16:9 ratio
-
-  backgroundColor: "#000",
-  borderRadius: 20,
-  overflow: "hidden",
-  zIndex: 999,
-},
-
-videoWrapper: {
-  width: "100%",
-  height: "100%",
-},
-
-video: {
-  width: "100%",
-  height: "100%",
-},
-
-video: {
-  flex: 1,
-},
-
-closeBtn: {
-  position: "absolute",
-  top: 10,
-  right: 10,
-  zIndex: 1000,
-  backgroundColor: "rgba(0,0,0,0.5)",
-  padding: 6,
-  borderRadius: 20,
-},
 });
